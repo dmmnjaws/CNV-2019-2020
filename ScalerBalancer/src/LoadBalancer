@@ -1,0 +1,79 @@
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
+import pt.ulisboa.tecnico.cnv.solver.SolverArgumentParser;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
+
+public class LoadBalancer{
+
+    static class HandleRequest implements HttpHandler {
+
+        @Override
+        public void handle(HttpExchange t) throws IOException {
+
+            //RequestData request = new RequestData(makeRequestId(t));
+
+        }
+    }
+
+    public static String makeRequestId(HttpExchange t){
+
+        String query = t.getRequestURI().getQuery();
+
+        final ArrayList<String> newArgs = new ArrayList<>();
+
+        final String[] params = query.split("&");
+
+        for (final String p : params) {
+            final String[] splitParam = p.split("=");
+            newArgs.add("-" + splitParam[0]);
+            newArgs.add(splitParam[1]);
+        }
+
+        newArgs.add("-b");
+
+        try {
+            newArgs.add(parseRequestBody(t.getRequestBody()));
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+        newArgs.add("-d");
+
+        final String[] args = new String[newArgs.size()];
+        int i = 0;
+        for(String arg: newArgs) {
+            args[i] = arg;
+            i++;
+        }
+
+        SolverArgumentParser solverArgumentParser = new SolverArgumentParser(args);
+
+        return "" + solverArgumentParser.getN1() + "x" + solverArgumentParser.getN2() + " " + solverArgumentParser.getUn() + " " + solverArgumentParser.getSolverStrategy();
+
+    }
+
+    public static String parseRequestBody(InputStream is) throws IOException {
+        InputStreamReader isr =  new InputStreamReader(is,"utf-8");
+        BufferedReader br = new BufferedReader(isr);
+
+        // From now on, the right way of moving from bytes to utf-8 characters:
+
+        int b;
+        StringBuilder buf = new StringBuilder(512);
+        while ((b = br.read()) != -1) {
+            buf.append((char) b);
+
+        }
+
+        br.close();
+        isr.close();
+
+        return buf.toString();
+    }
+
+}
