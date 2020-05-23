@@ -43,16 +43,7 @@ public class WebServer {
 		server.setExecutor(Executors.newCachedThreadPool());
 		server.start();
 
-		try {
-			FileWriter writer = new FileWriter("DeBug.txt", true);
-
-			writer.write("Phase 0\n");
-			writer.close();
-		} catch (IOException e){
-			System.out.println("Erro na escrita do ficheiro");
-		}
-
-		//System.out.println(server.getAddress().toString());
+		System.out.println(server.getAddress().toString());
 	}
 
 	public static String parseRequestBody(InputStream is) throws IOException {
@@ -60,12 +51,10 @@ public class WebServer {
         BufferedReader br = new BufferedReader(isr);
 
         // From now on, the right way of moving from bytes to utf-8 characters:
-
         int b;
         StringBuilder buf = new StringBuilder(512);
         while ((b = br.read()) != -1) {
             buf.append((char) b);
-
         }
 
         br.close();
@@ -77,10 +66,6 @@ public class WebServer {
 	static class MyPingHandler implements HttpHandler {
 		@Override
 		public void handle(HttpExchange t) throws IOException {
-			FileWriter writer = new FileWriter("DeBug.txt", true);
-			writer.write("Phase Ping\n");
-			writer.close();
-
 			String response = "OK";
 			t.sendResponseHeaders(200, response.length());
 			OutputStream os = t.getResponseBody();
@@ -96,7 +81,6 @@ public class WebServer {
 			ArrayList<AtomicLong> data = new ArrayList<AtomicLong>();
 			data.add(new AtomicLong(0));
 			data.add(new AtomicLong(0));
-			
 
 			metrics.put(Thread.currentThread().getId(), data);
 
@@ -133,15 +117,6 @@ public class WebServer {
 			// Create solver instance from factory.
 			final Solver s = SolverFactory.getInstance().makeSolver(ap);
 
-			try {
-				FileWriter writer = new FileWriter("DeBug.txt", true);
-
-				writer.write("Phase 3\n");
-				writer.close();
-			} catch (IOException e){
-				//System.out.println("Erro na escrita do ficheiro");
-			}
-
 			//Solve sudoku puzzle
 			JSONArray solution = s.solveSudoku();
 
@@ -161,15 +136,6 @@ public class WebServer {
 
             t.sendResponseHeaders(200, solution.toString().length());
 
-			try {
-				FileWriter writer = new FileWriter("DeBug.txt", true);
-
-				writer.write("Phase 4\n");
-				writer.close();
-			} catch (IOException e){
-				//System.out.println("Erro na escrita do ficheiro");
-			}
-
             final OutputStream os = t.getResponseBody();
             OutputStreamWriter osw = new OutputStreamWriter(os, "UTF-8");
             osw.write(solution.toString());
@@ -178,7 +144,7 @@ public class WebServer {
 
 			os.close();
 				
-			//System.out.println("> Sent response to " + t.getRemoteAddress().toString());
+			System.out.println("> Sent response to " + t.getRemoteAddress().toString());
 			ArrayList<AtomicLong> newData = metrics.get(Thread.currentThread().getId());
 			try{
 
@@ -191,19 +157,10 @@ public class WebServer {
 				e.printStackTrace();
 			}
 
-			try {
-				FileWriter writer = new FileWriter("DeBug.txt", true);
-
-				writer.write("Phase 5\n");
-				writer.close();
-			} catch (IOException e){
-				//System.out.println("Erro na escrita do ficheiro");
-			}
-
 		}
 	}
 
-	public void writeToFile(SolverArgumentParser ap, ArrayList<AtomicLong> newData){
+	public static void writeToFile(SolverArgumentParser ap, ArrayList<AtomicLong> newData){
     	try {
 			FileWriter writer = new FileWriter("MetricsFile.txt", true);
 
@@ -213,7 +170,7 @@ public class WebServer {
 			writer.write("Instrucoes: " + newData.get(0).get() + " blocos: " + newData.get(1).get() + "\n\n");
 			writer.close();
 		} catch (IOException e){
-    		//System.out.println("Erro na escrita do ficheiro");
+    		System.out.println("Erro na escrita do ficheiro");
 		}
 	}
 

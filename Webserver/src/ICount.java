@@ -13,10 +13,9 @@
  */
 
 import BIT.highBIT.*;
-import pt.ulisboa.tecnico.cnv.server.WebServer;
-
 import java.io.*;
 import java.util.*;
+import pt.ulisboa.tecnico.cnv.server.WebServer;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class ICount {
@@ -60,9 +59,9 @@ public class ICount {
     public static synchronized void count(int incr) {
         i_count += incr;
         b_count++;
-        ArrayList<AtomicLong> x = WebServer.getMap().get(Thread.currentThread().getId());
-        x.get(0).set(x.get(0).get() + incr);
-        x.get(1).set(x.get(1).get() + 1);
+	ArrayList<AtomicLong> x = WebServer.getMap().get(Thread.currentThread().getId());
+	x.get(0).set(x.get(0).get() + incr);
+	x.get(1).set(x.get(1).get() + 1);
     }
 
     public static synchronized void mcount(int incr) {
