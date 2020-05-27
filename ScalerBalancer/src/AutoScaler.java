@@ -32,19 +32,28 @@ import java.util.ConcurrentModificationException;
 
 public class AutoScaler {
 
-    private static AmazonEC2 ec2;
+    static AmazonEC2 ec2;
     static AmazonCloudWatch cloudWatch;
     private RunInstancesResult runInstancesResult;
 
-    private List<String> instancesIdList;
+    //To change our systems replication factor, change this value.
+    //This ensures no instances are deleted if there are less than *this value* instances running.
+    private int REPLICATION_FACTOR = 3;
+    //To change our systems max number of replicas, change this value.
+    //This ensures no instances are created if there are more than *this value* instances running. (avoid sudden costs)
+    private int MAX_NUMBER_OF_INSTANCES = 20;
+
+    private List<String> instancesIdList = new ArrayList<>();
     private HashMap<String, Double> instanceIdCPUMap = new HashMap<String, Double>();
     private HashMap<String, List<RequestData>> instanceIdRequestsMap = new HashMap<String, List<RequestData>>();
+    private List<String> signaledInstancesIdList = new ArrayList<>();
 
     public AutoScaler(){
         try {
             init();
-            launchNewInstances(ec2, 3, 3);
-
+            launchNewInstance();
+            launchNewInstance();
+            launchNewInstance();
         } catch (Exception e){
             System.out.println("Fail to initialize the Auto-Scaler");
         }
@@ -72,10 +81,12 @@ public class AutoScaler {
     }
 
     public void execute(){
+
         try {
+
             while(true){
                 try {
-                    Thread.sleep(330000); //the CPU loads reported differ every 5 minutes and a half, therefore it only makes sence the auto-balance algorithm runs with this periodicity
+                    Thread.sleep(360000); //the CPU loads reported differ every 6 minutes or so, therefore it only makes sence the auto-balance algorithm runs with this periodicity
                 } catch (InterruptedException e){
                     System.out.println("Auto-Scaler thread interrupted...");
                     break;
@@ -86,7 +97,7 @@ public class AutoScaler {
             }
         } catch (AmazonServiceException ase) {
             System.out.println("Caught Exception: " + ase.getMessage());
-            System.out.println("Reponse Status Code: " + ase.getStatusCode());
+            System.out.println("Response Status Code: " + ase.getStatusCode());
             System.out.println("Error Code: " + ase.getErrorCode());
             System.out.println("Request ID: " + ase.getRequestId());
         } catch (Exception e){
@@ -111,30 +122,31 @@ public class AutoScaler {
     }
 
 
-    public void launchNewInstances(AmazonEC2 ec2, int minNumberOfInstances, int maxNumberOfInstances){
+    public void launchNewInstance(){
 
-        //preparing the instance request
-        RunInstancesRequest runInstancesRequest = new RunInstancesRequest();
+        if(this.instancesIdList.size() <= MAX_NUMBER_OF_INSTANCES) {
 
-        /* TODO: configure to use your AMI, key and security group */
-        //configuring setting for new instance on runInstancesRequest
-        runInstancesRequest.withImageId("ami-0c18f283bdb8449f2")
-                .withInstanceType("t2.micro")
-                .withMinCount(minNumberOfInstances)
-                .withMaxCount(maxNumberOfInstances)
-                .withKeyName("CNV-AWS")
-                .withSecurityGroups("CNV-group");
-        //launching the new instance with the previous settings
-        RunInstancesResult runInstancesResult = ec2.runInstances(runInstancesRequest);
+            //preparing the instance request
+            RunInstancesRequest runInstancesRequest = new RunInstancesRequest();
 
-        getInstancesIds(runInstancesResult);
+            /* TODO: configure to use your AMI, key and security group */
+            //configuring setting for new instance on runInstancesRequest
+            runInstancesRequest.withImageId("ami-04bc04bc6d8b79de5")
+                    .withInstanceType("t2.micro")
+                    .withMinCount(1)
+                    .withMaxCount(1)
+                    .withKeyName("CNV-AWS")
+                    .withSecurityGroups("CNV-group");
+            //launching the new instance with the previous settings
+            RunInstancesResult runInstancesResult = ec2.runInstances(runInstancesRequest);
+
+            getInstancesIds(runInstancesResult);
+
+        }
     }
 
 
     public void getInstancesIds(RunInstancesResult runInstancesResult){
-
-        List<String> instancesIds = new ArrayList<>();
-        HashMap<String, List<RequestData>> instanceIdRequestsMap = new HashMap<String, List<RequestData>>();
 
         //getting instances from reservations
         for (Instance instance : runInstancesResult.getReservation().getInstances()) {
@@ -142,12 +154,9 @@ public class AutoScaler {
             //getting ID from every new instance
             String newInstanceId = instance.getInstanceId();
             System.out.println("AUTO-SCALER: Instance " + newInstanceId + " started.");
-            instancesIds.add(newInstanceId);
-            instanceIdRequestsMap.put(newInstanceId, new ArrayList<RequestData>());
+            this.instancesIdList.add(newInstanceId);
+            this.instanceIdRequestsMap.put(newInstanceId, new ArrayList<RequestData>());
         }
-
-        this.instanceIdRequestsMap = instanceIdRequestsMap;
-        this.instancesIdList = instancesIds;
     }
 
     public void terminateInstancesNow(List<String> instancesIds){
@@ -168,14 +177,7 @@ public class AutoScaler {
 
     }
 
-    public List<String> getInstanceList(){
-        return this.instancesIdList;
-    }
-
-    public HashMap<String, List<RequestData>> getInstanceIdRequestsMap() {
-        return this.instanceIdRequestsMap;
-    }
-
+    //no downside being synchronized, since it only runs every 6 minutes to assert the state of the instances.
     public synchronized HashMap<String, Double> getInstancesCPU(){
 
         long offsetInMilliseconds = 1000 * 60 * 10;
@@ -218,9 +220,9 @@ public class AutoScaler {
                 System.out.println("\nAUTO-SCALER: CPU utilization for instance " + name + " = " + maxCPUUsage);
                 instanceIdCPUMap.put(name, maxCPUUsage);
 
-                if(this.instancesIdList.size() > 1) {
+                if(this.instancesIdList.size() > REPLICATION_FACTOR) {
                     //TODO WE AREN'T ABLE TO SEND HTTP REQUESTS YET, BUT WHEN WE DO, WE SHOULD TEST WHAT KIND OF CPU LOAD A MACHINE INCURS IN.
-                    if (maxCPUUsage.compareTo(Double.valueOf(3)) < 0) {
+                    if (maxCPUUsage.compareTo(Double.valueOf(5)) < 0) {
                         System.out.println("AUTO-SCALER: CPU usage of instance " + name + " is low!");
                         if (this.instanceIdRequestsMap.get(name).size() == 0) {
                             System.out.println("AUTO-SCALER: Instance " + name + " has no pending requests.");
@@ -232,9 +234,15 @@ public class AutoScaler {
                 }
 
                 //TODO ONCE AGAIN, WE AREN'T ABLE TO SEND HTTP REQUESTS YET, BUT WHEN WE DO, WE SHOULD TEST WHAT KIND OF CPU LOAD A MACHINE INCURS IN.
-                if (maxCPUUsage.compareTo(Double.valueOf(75)) > 0) {
+                if (maxCPUUsage.compareTo(Double.valueOf(60)) > 0) {
                     System.out.println("AUTO-SCALER: Instance " + name + " is overloaded!");
-                    launchNewInstances(ec2, 1, 1);
+                    launchNewInstance();
+                }
+
+                //This is to ensure the pessimistic case where the number of instances drops below the replicationFactor
+                if(this.instancesIdList.size() < REPLICATION_FACTOR){
+                    int balance = REPLICATION_FACTOR - this.instancesIdList.size() + 1;
+                    launchNewInstance();
                 }
 
             }
@@ -244,6 +252,7 @@ public class AutoScaler {
 
             //System.out.println("Instance State : " + state +".");
         }
+        this.signaledInstancesIdList = new ArrayList<>();
         return instanceIdCPUMap;
     }
 
@@ -273,15 +282,38 @@ public class AutoScaler {
 
     public void appendRequest(String instanceId, RequestData request){
         if(this.instanceIdRequestsMap.get(instanceId) != null){
-            System.out.println("Instance " + instanceId + " has a new request in queue.");
+            System.out.println("LOAD-BALANCER: Instance " + instanceId + " has a new request in queue.");
             this.instanceIdRequestsMap.get(instanceId).add(request);
         };
     }
 
     public void unappendRequest(String instanceId, RequestData request){
-        System.out.println("Instance " + instanceId + " completed a request.");
+        System.out.println("LOAD-BALANCER: Instance " + instanceId + " completed a request.");
         this.instanceIdRequestsMap.get(instanceId).remove(request);
     }
+
+    public double getInstanceLoad(String instanceId){
+        double totalLoad = 0;
+        for (RequestData request : this.instanceIdRequestsMap.get(instanceId)){
+            totalLoad += request.getPredictedLoad();
+        }
+
+        return totalLoad;
+    }
+
+    public void signalInstance(String instanceId){
+        //signals an instance suspected to have failed
+        System.out.println("LOAD-BALANCER: Instance " + instanceId + " signaled as unresponsive.");
+        this.signaledInstancesIdList.add(instanceId);
+    }
+
+    public List<String> getInstanceList(){
+        return this.instancesIdList;
+    }
+    public HashMap<String, List<RequestData>> getInstanceIdRequestsMap() {
+        return this.instanceIdRequestsMap;
+    }
+    public List<String> getSignaledInstancesIdList() { return this.signaledInstancesIdList; }
 
 }
 

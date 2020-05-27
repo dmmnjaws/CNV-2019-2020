@@ -81,6 +81,7 @@ public class WebServer {
 			ArrayList<AtomicLong> data = new ArrayList<AtomicLong>();
 			data.add(new AtomicLong(0));
 			data.add(new AtomicLong(0));
+			data.add(new AtomicLong(0));
 
 			metrics.put(Thread.currentThread().getId(), data);
 
@@ -149,7 +150,8 @@ public class WebServer {
 			try{
 
 				AmazonDynamoDBAid.init();
-				AmazonDynamoDBAid.addItem(AmazonDynamoDBAid.createItem(ap.getN1() + "x" + ap.getN2() + " " + ap.getUn() + " " + ap.getSolverStrategy() , newData.get(0).get(), newData.get(1).get()));
+				AmazonDynamoDBAid.addItem(AmazonDynamoDBAid.createItem(ap.getN1() + "x" + ap.getN2() + " " + ap.getUn()
+						+ " " + ap.getSolverStrategy() , newData.get(0).get(), newData.get(1).get(), newData.get(2).get()));
 
 			}catch (IOException e){
 				e.printStackTrace();

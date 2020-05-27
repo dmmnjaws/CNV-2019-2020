@@ -3,6 +3,7 @@ package pt.ulisboa.tecnico.cnv.loadbalancer;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.Headers;
 import pt.ulisboa.tecnico.cnv.solver.SolverArgumentParser;
 
 import java.util.concurrent.ExecutorService;
@@ -13,15 +14,16 @@ import java.util.concurrent.Executors;
 import java.net.InetSocketAddress;
 import java.net.URL;
 import java.net.HttpURLConnection;
-
+import java.lang.Double;
 
 public class LoadBalancer{
 
     private static AutoScaler autoScaler;
+    private static boolean shutdown = false;
 
     public static void main (final String[] args) throws Exception {
 
-        final HttpServer server = HttpServer.create(new InetSocketAddress(80), 0);
+        final HttpServer server = HttpServer.create(new InetSocketAddress(8000), 0);
 
         server.createContext("/ping", new MyPingHandler());
         server.createContext("/sudoku", new HandleRequest());
@@ -35,6 +37,8 @@ public class LoadBalancer{
 
         // Start autoscaler
         autoScaler = new AutoScaler();
+        //health check
+        checkInstances();
 
         Runnable autoScalerRoutine = new Runnable() {
             public void run() {
@@ -46,7 +50,8 @@ public class LoadBalancer{
         checker.start();
 
         System.console().readLine();
-        System.out.println("Shutting down the instances...");
+        shutdown = true;
+        System.out.println("\nShutting down the instances...");
         autoScaler.shutdown();
         checker.interrupt();
         checker.join();
@@ -54,6 +59,45 @@ public class LoadBalancer{
         server.stop(1);
         System.out.println("Shutting down the ThreadPool...");
         pool.shutdownNow();
+    }
+
+    public static void checkInstances(){
+
+        List<String> instanceIds = autoScaler.getInstanceList();
+        for (String instanceId : instanceIds) {
+            try {
+
+                String instanceDNS = "";
+                while (instanceDNS.equals("")){
+                    Thread.sleep(250);
+                    instanceDNS = autoScaler.getInstanceDNSURL(instanceId);
+                    System.out.println("DNS: " + instanceDNS);
+                }
+                URL url = new URL("http://" + instanceDNS + ":8000/ping");
+                HttpURLConnection con = (HttpURLConnection) url.openConnection();
+                con.setRequestMethod("GET");
+
+                try (BufferedReader in = new BufferedReader(
+                        new InputStreamReader(con.getInputStream()))) {
+
+                    StringBuilder response = new StringBuilder();
+                    String line;
+
+                    while ((line = in.readLine()) != null) {
+                        response.append(line);
+                    }
+
+                    System.out.println(instanceId + ": " + response.toString());
+
+                }
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                System.out.println("REQUEST: Failed HTTP request, looking for another server.");
+                autoScaler.signalInstance(instanceId);
+                //TODO when the server is down.
+            }
+        }
     }
 
     static class MyPingHandler implements HttpHandler {
@@ -72,21 +116,48 @@ public class LoadBalancer{
         @Override
         public void handle(final HttpExchange t) throws IOException {
 
+            System.out.println("\nREQUEST: HTTP Request received.");
             RequestData request = makeRequestId(t);
 
-            //TODO: Load Balancing
+            //Load Balancing
+            String solution = null;
+            while(solution == null){
+                String bestInstance = loadBalancing();
+                if(bestInstance.equals("")){
+                    System.out.println("\nWARNING: Request Failed");
 
-            byte[] solution = getSolution(request, autoScaler.getInstanceList().get(0));
+                    if(!shutdown){
+                        autoScaler.launchNewInstance();
+                    }
 
-            t.sendResponseHeaders(200, solution.length);
+                    break;
+                }
+                solution = getSolution(request, bestInstance, t);
+            }
+
+            final Headers hdrs = t.getResponseHeaders();
+
+            hdrs.add("Content-Type", "application/json");
+
+            hdrs.add("Access-Control-Allow-Origin", "*");
+
+            hdrs.add("Access-Control-Allow-Credentials", "true");
+            hdrs.add("Access-Control-Allow-Methods", "POST, GET, HEAD, OPTIONS");
+            hdrs.add("Access-Control-Allow-Headers", "Origin, Accept, X-Requested-With, Content-Type, Access-Control-Request-Method, Access-Control-Request-Headers");
+
+            t.sendResponseHeaders(200, solution.length());
             OutputStream outputStream = t.getResponseBody();
-            outputStream.write(solution);
+            OutputStreamWriter osw = new OutputStreamWriter(outputStream, "UTF-8");
+            osw.write(solution.toString());
+            osw.flush();
+            osw.close();
             outputStream.close();
-            System.out.println("Query responded: " + request.getQuery());
+
+            System.out.println("REQUEST: Query with params " + request.getQuery() + " answered.");
         }
     }
 
-    public static byte[] getSolution(RequestData request, String instanceId){
+    public static String getSolution(RequestData request, String instanceId, HttpExchange t){
 
         String instanceDNS = autoScaler.getInstanceDNSURL(instanceId);
 
@@ -97,52 +168,45 @@ public class LoadBalancer{
             String urlParameters = request.getQuery();
             byte[] postData = urlParameters.getBytes("UTF-8");
             int postDataLength = postData.length;
-            URL url = new URL("http://" + instanceDNS + ":8000/sudoku");
+            URL url = new URL("http://" + instanceDNS + ":8000/sudoku?" + urlParameters);
 
-            System.out.println("\nQuery: " + url + "?" + urlParameters);
+            System.out.println("\nREQUEST: Query received: " + url);
 
-            HttpURLConnection con = (HttpURLConnection) url.openConnection();
-            con.setDoOutput(true);
+            HttpURLConnection con = (HttpURLConnection)url.openConnection();
             con.setRequestMethod("POST");
-            con.setRequestProperty("User-Agent", "Java Client");
-            con.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            con.setRequestProperty("Content-Type", "application/json; utf-8");
+            con.setRequestProperty("Accept", "application/json");
+            con.setDoOutput(true);
 
-            try( DataOutputStream wr = new DataOutputStream( con.getOutputStream())) {
-                wr.write( postData );
+            try (DataOutputStream wr = new DataOutputStream(con.getOutputStream())) {
+                wr.write(parseRequestBody(t.getRequestBody()).getBytes("UTF-8"));
             }
 
-            StringBuilder content;
-
-            try(BufferedReader br = new BufferedReader(new InputStreamReader(con.getInputStream()))) {
-
-                String line;
-                content = new StringBuilder();
-
-                while((line = br.readLine()) != null){
-                    content.append(line);
-                    content.append(System.lineSeparator());
+            StringBuilder response = null;
+            try(BufferedReader br = new BufferedReader(new InputStreamReader(con.getInputStream(), "utf-8"))) {
+                response = new StringBuilder();
+                String responseLine = null;
+                while ((responseLine = br.readLine()) != null) {
+                    response.append(responseLine.trim());
                 }
-
             }
 
             autoScaler.unappendRequest(instanceId, request);
+            return response.toString();
 
         } catch (Exception e) {
             e.printStackTrace();
-            System.out.println("Failed http request, looking for another server.");
-
+            System.out.println("REQUEST: Failed HTTP request, looking for another server.");
+            autoScaler.signalInstance(instanceId);
+            return null;
             //TODO when the server is down.
         }
-
-        return null;
     }
 
     public static RequestData makeRequestId(HttpExchange t) {
 
         // Get the query.
         final String query = t.getRequestURI().getQuery();
-
-        System.out.println("Query received: " + query);
 
         final String strategy = query.substring(query.indexOf("s=") + 2, query.indexOf("&un="));
         final String n1 = query.substring(query.indexOf("n1=") + 3, query.indexOf("&n2="));
@@ -151,5 +215,43 @@ public class LoadBalancer{
 
         return new RequestData(query, n1, n2, un, strategy);
 
+    }
+
+    public static String loadBalancing(){
+
+        List<String> instanceIds = autoScaler.getInstanceList();
+        String bestInstance = "";
+        double lowestLoad = Double.MAX_VALUE;
+        for (String instanceId : instanceIds){
+            if(!autoScaler.getSignaledInstancesIdList().contains(instanceId)){
+                if(lowestLoad > autoScaler.getInstanceLoad(instanceId)){
+                    lowestLoad = autoScaler.getInstanceLoad(instanceId);
+                    bestInstance = instanceId;
+                }
+            }
+        }
+
+        if(!bestInstance.equals("")){
+            System.out.println("LOAD-BALANCER: instance " + bestInstance + " was selected to attend the request.");
+        }
+
+        return bestInstance;
+    }
+
+    public static String parseRequestBody(InputStream is) throws IOException {
+        InputStreamReader isr =  new InputStreamReader(is,"utf-8");
+        BufferedReader br = new BufferedReader(isr);
+
+        // From now on, the right way of moving from bytes to utf-8 characters:
+        int b;
+        StringBuilder buf = new StringBuilder(512);
+        while ((b = br.read()) != -1) {
+            buf.append((char) b);
+        }
+
+        br.close();
+        isr.close();
+
+        return buf.toString();
     }
 }

@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 public class ICount {
     private static PrintStream out = null;
-    private static int i_count = 0, b_count = 0, m_count = 0;
+    private static int i_count = 0, b_count = 0, m_count = 0, alloc_count = 0;
     
     /* main reads in all the files class files present in the input directory,
      * instruments them, and outputs them to the specified output directory.
@@ -40,6 +40,19 @@ public class ICount {
                 for (Enumeration e = ci.getRoutines().elements(); e.hasMoreElements(); ) {
                     Routine routine = (Routine) e.nextElement();
 					routine.addBefore("ICount", "mcount", new Integer(1));
+
+                    InstructionArray instructions = routine.getInstructionArray();
+
+                    for (Enumeration instrs = instructions.elements(); instrs.hasMoreElements(); ) {
+                        Instruction instr = (Instruction) instrs.nextElement();
+                        int opcode=instr.getOpcode();
+                        if ((opcode==InstructionTable.NEW) ||
+                                (opcode==InstructionTable.newarray) ||
+                                (opcode==InstructionTable.anewarray) ||
+                                (opcode==InstructionTable.multianewarray)) {
+                            instr.addBefore("ICount", "allocCount", new Integer(opcode));
+                        }
+                    }
                     
                     for (Enumeration b = routine.getBasicBlocks().elements(); b.hasMoreElements(); ) {
                         BasicBlock bb = (BasicBlock) b.nextElement();
@@ -59,14 +72,20 @@ public class ICount {
     public static synchronized void count(int incr) {
         i_count += incr;
         b_count++;
-	ArrayList<AtomicLong> x = WebServer.getMap().get(Thread.currentThread().getId());
-	x.get(0).set(x.get(0).get() + incr);
-	x.get(1).set(x.get(1).get() + 1);
+	    ArrayList<AtomicLong> x = WebServer.getMap().get(Thread.currentThread().getId());
+	    x.get(0).set(x.get(0).get() + incr);
+	    x.get(1).set(x.get(1).get() + 1);
+    }
+
+    public static synchronized void allocCount(int type)
+    {
+        alloc_count++;
+        ArrayList<AtomicLong> x = WebServer.getMap().get(Thread.currentThread().getId());
+        x.get(2).set(x.get(2).get() + 1);
     }
 
     public static synchronized void mcount(int incr) {
 		m_count++;
-		
     }
 }
 

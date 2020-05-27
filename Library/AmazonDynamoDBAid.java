@@ -73,7 +73,7 @@ public class AmazonDynamoDBAid{
 
         	DescribeTableRequest describeTableRequest = new DescribeTableRequest().withTableName(tableName);
         	TableDescription tableDescription = amazonDynamoDB.describeTable(describeTableRequest).getTable();
-        	System.out.println("Table Description: " + tableDescription);	
+        	//System.out.println("Table Description: " + tableDescription);
 
         } catch (AmazonServiceException ase) {
         
@@ -119,12 +119,13 @@ public class AmazonDynamoDBAid{
     	return scanResult.getItems();
     }
 
-    public static Map<String, AttributeValue> createItem(String requestParameters, long instructions, long basicBlocks){
+    public static Map<String, AttributeValue> createItem(String requestParameters, long instructions, long basicBlocks, long allocs){
     
     	Map<String, AttributeValue> item = new HashMap<String, AttributeValue>();
     	item.put("requestParameters", new AttributeValue(requestParameters));
     	item.put("instructions", new AttributeValue().withN(Long.toString(instructions)));
     	item.put("basicBlocks",  new AttributeValue().withN(Long.toString(basicBlocks)));
+		item.put("allocs",  new AttributeValue().withN(Long.toString(allocs)));
     
     	return item;
     }

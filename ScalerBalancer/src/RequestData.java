@@ -28,7 +28,7 @@ public class RequestData{
         this.columns = columns;
         this.strategy = strategy;
         this.unsignedPositions = unsignedPositions;
-        this.predictedLoad = 0;
+        this.predictedLoad = 1;
         calculatePredictedLoad();
     }
 
@@ -40,17 +40,29 @@ public class RequestData{
             e.printStackTrace();
         }
 
-        List<Map<String, AttributeValue>> metrics = AmazonDynamoDBAid.getItem(lines + "x" + columns + " " + unsignedPositions + " " + strategy);
+        String requestId = lines + "x" + columns + " " + unsignedPositions + " " + strategy;
+        List<Map<String, AttributeValue>> metrics = AmazonDynamoDBAid.getItem(requestId);
 
         if(!metrics.isEmpty()){
             Map<String, AttributeValue> metric = metrics.get(0);
-            System.out.println("\nMetrics: " + metric.get("instructions").getN() + " " + metric.get("basicBlocks").getN());
-            this.predictedLoad = (double) 0.5 * (double) Double.valueOf(metric.get("instructions").getN()) + 0.5 * (double) Double.valueOf(metric.get("basicBlocks").getN());
+            System.out.println("\nLOAD-BALANCER: Metrics collected for request " + requestId + ": "
+                    + "\n\tInstructions#: " + metric.get("instructions").getN()
+                    + "\n\tBasic Blocks#: " + metric.get("basicBlocks").getN()
+                    + "\n\tAllocs#: " + metric.get("allocs").getN() + "\n");
+            this.predictedLoad = (double) 0.000001 * (double) Double.valueOf(metric.get("instructions").getN())
+                    + 0.000001 * (double) Double.valueOf(metric.get("basicBlocks").getN())
+                    + (double) Double.valueOf(metric.get("allocs").getN()) ;
         }
     }
 
     public String getQuery(){
         return this.query;
     }
+    public double getPredictedLoad() { return this.predictedLoad; }
+
+    public String getN1() { return this.lines; }
+    public String getN2() { return this.columns; }
+    public String getUn() { return this.unsignedPositions; }
+    public String getS() { return this.strategy; }
 
 }
